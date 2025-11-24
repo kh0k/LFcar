@@ -5,14 +5,18 @@
 
 static int16_t *value2 = NULL;
 static int16_t *value3 = NULL;
+static int16_t *valueS2 = NULL;
+static int16_t *valueS3 = NULL;
 
 void Encoder_Init_Tim2(void);
 void Encoder_Init_Tim3(void);
 void TIM6_Init(void);
 
-void Encoder_PA_SET(int16_t *v2, int16_t *v3) {
+void Encoder_PA_SET(int16_t *v2, int16_t *v3, int16_t *vS2, int16_t *vS3) {
 	value2 = v2;
 	value3 = v3;
+	valueS2 = vS2;
+	valueS3 = vS3;
 	Encoder_Init_Tim2();
 	Encoder_Init_Tim3();
 	TIM6_Init();
@@ -154,6 +158,9 @@ void TIM6_IRQHandler(void) {
 		TIM2->CNT = 0;
 		*value3 = (int16_t)TIM3->CNT;
 		TIM3->CNT = 0;
+
+		*valueS2 += *value2;
+		*valueS3 += *value3;
 
 		TIM_ClearITPendingBit(TIM6, TIM_IT_Update);
 	}

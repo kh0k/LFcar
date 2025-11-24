@@ -11,6 +11,7 @@
 #define value_len 10
 
 int16_t EvalueA = 0, EvalueB = 0;
+int16_t EvalueA100 = 0, EvalueB100 = 0;
 
 int16_t SPDA=0,SPDB=0;
 
@@ -30,7 +31,7 @@ int main(void) {
 	KEY_SET();
 	PWM_SET();
 	OLED_SET();
-	Encoder_PA_SET(&EvalueA, &EvalueB);
+	Encoder_PA_SET(&EvalueA, &EvalueB, &EvalueA100, &EvalueB100);
 	OLED_Refresh();
 	delay_ms(1000);
 
@@ -53,8 +54,13 @@ void loop_car(void) {
 	OLED_ShowNum(70,12+10,SPDB,4,12,1);
 	OLED_ShowString(6, 12+20, "ECDA", 12, 1);
 	OLED_ShowString(70,12+20, "ECDB", 12, 1);
-	OLED_ShowNum(6, 12+30, EvalueA,4,12,1);
+	OLED_ShowNum(6, 12+30,EvalueA,4,12,1);
 	OLED_ShowNum(70,12+30,EvalueB,4,12,1);
+	OLED_ShowNum(6, 12+40,EvalueA100,4,12,1);
+	OLED_ShowNum(70,12+40,EvalueB100,4,12,1);
+
+	EvalueA100=0;
+	EvalueB100=0;
 
 //	if (cnt)
 //		OLED_DrawBoxLine(0,8,63,63,1);
