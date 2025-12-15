@@ -12,7 +12,7 @@
 #define TRIG_LOW	{GPIOA->BRR = TRIG;}
 #define TRIG_TOGGLE	{GPIOA->ODR ^= TRIG;}
 
-volatile uint8_t  capture_done = 0;
+volatile int8_t  capture_done = 1;
 volatile uint16_t  time = 0;
 float distance = 0;
 
@@ -72,16 +72,25 @@ void TIM5_IRQHandler(void) {
 		TIM_ClearITPendingBit(TIM5, TIM_IT_CC4);	//清除标志
 
 		if (TIM5->CCER & TIM_CCER_CC4P) {	//如果是下降沿捕获
-			time = TIM_GetCapture4(TIM5) - time;	//捕获
+			//time = TIM_GetCapture4(TIM5) - time;	//捕获
+			time = TIM5->CCR4;	//捕获
 			TIM5->CCER &= ~TIM_CCER_CC4P;	//切换回上升沿
 			capture_done = 1;	//标记测量完成
 		} else {	//如果是上升沿捕获
-			time = TIM_GetCapture4(TIM5);	//捕获
+			//time = TIM_GetCapture4(TIM5);	//捕获
+			TIM5->CNT = 0;
+			capture_done = -1;
+			//TIM5->CCR4 = 0;
 			TIM5->CCER |= TIM_CCER_CC4P;	//切换为下降沿
 		}
 	}
-	//可选：处理溢出中断（测量超时）
-	//if (TIM_GetITStatus(TIM5, TIM_IT_Update) != RESET)
+	if (TIM_GetITStatus(TIM5, TIM_IT_Update) != RESET) {
+		TIM_ClearITPendingBit(TIM5, TIM_IT_Update);
+		if (capture_done == -1) {
+			time = 0xFFFF;
+			capture_done = 1;
+		}
+	}
 }
 
 int main(void) {
@@ -122,4 +131,3 @@ int main(void) {
 		delay_ms(1000);
 	}
 }
-
