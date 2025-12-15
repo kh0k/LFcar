@@ -12,6 +12,10 @@
 #define TRIG_LOW	{GPIOA->BRR = TRIG;}
 #define TRIG_TOGGLE	{GPIOA->ODR ^= TRIG;}
 
+volatile uint8_t  capture_done = 0;
+volatile uint16_t  time = 0;
+float distance = 0;
+
 void SET_TRIG_and_ECHO(void) {	//初始化引脚TRIG和ECHO
 	GPIO_InitTypeDef GPIO_InitStructure;
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
@@ -68,11 +72,11 @@ void TIM5_IRQHandler(void) {
 		TIM_ClearITPendingBit(TIM5, TIM_IT_CC4);	//清除标志
 
 		if (TIM5->CCER & TIM_CCER_CC4P) {	//如果是下降沿捕获
-			capture_end = TIM_GetCapture4(TIM5);	//读取捕获值
+			time = TIM_GetCapture4(TIM5) - time;	//捕获
 			TIM5->CCER &= ~TIM_CCER_CC4P;	//切换回上升沿
 			capture_done = 1;	//标记测量完成
 		} else {	//如果是上升沿捕获
-			capture_start = TIM_GetCapture4(TIM5);	//读取捕获值
+			time = TIM_GetCapture4(TIM5);	//捕获
 			TIM5->CCER |= TIM_CCER_CC4P;	//切换为下降沿
 		}
 	}
@@ -80,18 +84,21 @@ void TIM5_IRQHandler(void) {
 	//if (TIM_GetITStatus(TIM5, TIM_IT_Update) != RESET)
 }
 
-volatile uint32_t capture_start = 0;
-volatile uint32_t capture_end = 0;
-volatile uint8_t  capture_done = 0;
-
 int main(void) {
+	SystemInit();
+	delay_init();
+	//KEY_SET();
+
+	OLED_SET();
+	OLED_Refresh();
 	SET_TRIG_and_ECHO();
 	TIM5_init();
+	delay_ms(1000);
 
 	while (1) {
 		//1. 触发超声波
 		TRIG_HIGH;
-		delay_us(15);	//至少10us高电平
+		delay_us(35);
 		TRIG_LOW;
 
 		//2. 重置状态
@@ -102,10 +109,17 @@ int main(void) {
 		while (!capture_done);
 
 		//4. 计算距离
-		uint32_t pulse_width = capture_end - capture_start;
-		float distance = pulse_width * 0.017;	//单位：cm
+		//distance = time * 0.017;	//单位：cm
+
+		//OLED_ShowString(6, 12, "distance", 12, 1);
+		//OLED_ShowNumNoLen(6, 22, (uint32_t)distance, 12, 1);
+		OLED_ShowString(6, 12, "time", 12, 1);
+		OLED_ShowNumNoLen(6, 22, time, 12, 1);
+		OLED_Refresh();
+		OLED_ClearRF();
 
 		//5. 延时后重复测量
-		delay_ms(100);
+		delay_ms(1000);
 	}
 }
+
