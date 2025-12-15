@@ -1,255 +1,111 @@
 #include "stm32f10x.h"
 #include "key.h"
-#include "pwm.h"
-#include "mmgj.h"
 #include "oled.h"
 #include "delay.h"
-//#include "button.h"
-#include "encoder.h"
-#include "LightSensor.h"
 
 /********************************************/
 
-#define LEFT	0b11100000
-#define MID 	0b00011000
-#define RIGHT	0b00000111
+#define TRIG GPIO_Pin_2
+#define ECHO GPIO_Pin_3
 
-#define value_len 10
+#define TRIG_HIGH	{GPIOA->BSRR = TRIG;}
+#define TRIG_LOW	{GPIOA->BRR = TRIG;}
+#define TRIG_TOGGLE	{GPIOA->ODR ^= TRIG;}
 
-uint8_t count = 1, area = 0, option = 0, option_NUM = 10, sel_flag = 1, car_screen_flag = 0, value_num = 0;
+void SET_TRIG_and_ECHO(void) {	//初始化引脚TRIG和ECHO
+	GPIO_InitTypeDef GPIO_InitStructure;
+	RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
 
-uint8_t loop_car_delaytime = 10;
+	GPIO_InitStructure.GPIO_Pin = TRIG;
+	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;	//普通推挽输出
+	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+	GPIO_Init(GPIOA, &GPIO_InitStructure);
 
-//距离
-uint32_t distance = 0, distance_now = 0, distance_pj = 0;
+	GPIO_InitStructure.GPIO_Pin = ECHO;
+	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN_FLOATING;	//浮空输入
+	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+	GPIO_Init(GPIOA, &GPIO_InitStructure);
+}
 
-//TIM
-volatile uint32_t Stime;
-volatile int16_t EvalueA = 0, EvalueB = 0;
+void TIM5_init(void) {
+	TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
+	TIM_ICInitTypeDef TIM_ICInitStructure;
+	NVIC_InitTypeDef NVIC_InitStructure;
 
-//pid0 给定值
-int16_t GA = 40, GB = 40;
+	RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM5, ENABLE);	//使能TIM5时钟
 
-//pid1
-uint8_t ReadNow, LastRead;
-float LKp, LKi, LKd;
-int8_t Er, pre_Er;
-int16_t sum_Er;
-static const int8_t jq[8] = {25, 20, 12, 5, -5, -12, -20, -25};
-uint8_t GAB;
+	TIM_TimeBaseStructure.TIM_Prescaler = 71;	//72MHz/(71+1)=1MHz，1MHz计数频率(1μs分辨率)(每1μs记一次)
+	TIM_TimeBaseStructure.TIM_Period = 0xFFFF;	//最大65535μs
+	TIM_TimeBaseStructure.TIM_ClockDivision = TIM_CKD_DIV1;
+	TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
+	TIM_TimeBaseInit(TIM5, &TIM_TimeBaseStructure);
 
-//stop
-uint8_t bian = 0, bian_pre = 0, bian_flag = 1;
-uint8_t quan = 0;
-volatile uint32_t Stime_bian = 0xFFFFFFFF + 1 - 200;	//2^32 - 200
+	//输入捕获配置
+	TIM_ICInitStructure.TIM_Channel = TIM_Channel_4;	//CH4 -> PA3
+	TIM_ICInitStructure.TIM_ICPolarity = TIM_ICPolarity_Rising;	//上升沿捕获
+	TIM_ICInitStructure.TIM_ICSelection = TIM_ICSelection_DirectTI;
+	TIM_ICInitStructure.TIM_ICPrescaler = TIM_ICPSC_DIV1;
+	TIM_ICInitStructure.TIM_ICFilter = 0x0;
+	TIM_ICInit(TIM5, &TIM_ICInitStructure);
 
+	//使能捕获中断
+	TIM_ITConfig(TIM5, TIM_IT_CC4, ENABLE);
+	TIM_ITConfig(TIM5, TIM_IT_Update, ENABLE);	//可选:溢出中断
 
-uint8_t value[10][value_len] = {
-	{0, 3, 8, 0, 0, 0, 0, 0, 0, 3},	//0
-	{0, 0, 0, 0, 6, 0, 0, 0, 0, 3},	//1
-	{0, 6, 6, 0, 0, 0, 0, 0, 0, 3},	//2
-	{2, 0, 0, 0, 0, 0, 0, 0, 0, 2},	//3
-	{0, 0, 0, 0, 0, 0, 0, 0, 0, 3},	//4
-	{0, 0, 0, 0, 0, 0, 0, 0, 0, 5},	//5
-	{0, 0, 0, 0, 0, 0, 0, 0, 0, 5},	//6
-	{0, 0, 0, 0, 0, 0, 0, 0, 0, 5},	//7
-	{0, 1, 0, 0, 0, 0, 0, 0, 0, 5},	//8
-	{0, 0, 0, 0, 0, 0, 0, 0, 0, 5},	//9
-};
+	//NVIC配置
+	NVIC_InitStructure.NVIC_IRQChannel = TIM5_IRQn;
+	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 2;
+	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
+	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+	NVIC_Init(&NVIC_InitStructure);
 
-uint8_t name[10][10] = {
-	"LKp",	//0
-	"LKi",	//1
-	"LKd",	//2
-	"GAB",	//3
-	"quan",	//4
-	"name5",	//5
-	"name6",	//6
-	"name7",	//7
-	"name8",	//8
-	"distance",	//9
-};
+	//启动定时器
+	TIM_Cmd(TIM5, ENABLE);
+}
 
-/********************************************/
+void TIM5_IRQHandler(void) {
+	if (TIM_GetITStatus(TIM5, TIM_IT_CC4) != RESET) {	//检查捕获中断标志
+		TIM_ClearITPendingBit(TIM5, TIM_IT_CC4);	//清除标志
 
-//void loop_screen0(void);
-//void loop_screen1(void);
-void loop_car(void);
-void loop_car_quan(void);
+		if (TIM5->CCER & TIM_CCER_CC4P) {	//如果是下降沿捕获
+			capture_end = TIM_GetCapture4(TIM5);	//读取捕获值
+			TIM5->CCER &= ~TIM_CCER_CC4P;	//切换回上升沿
+			capture_done = 1;	//标记测量完成
+		} else {	//如果是上升沿捕获
+			capture_start = TIM_GetCapture4(TIM5);	//读取捕获值
+			TIM5->CCER |= TIM_CCER_CC4P;	//切换为下降沿
+		}
+	}
+	//可选：处理溢出中断（测量超时）
+	//if (TIM_GetITStatus(TIM5, TIM_IT_Update) != RESET)
+}
 
-void pidInit(void);
-
-void pidInit_1(void);
-
-void pid0(void);
-void pid1(void);
-
-void Quan0(void);
-void Quan1(void);
-
-/********************************************/
+volatile uint32_t capture_start = 0;
+volatile uint32_t capture_end = 0;
+volatile uint8_t  capture_done = 0;
 
 int main(void) {
-
-	SystemInit();
-	delay_init();
-	KEY_SET();
-	PWM_SET();
-	OLED_SET();
-//	Button_SET();
-	Encoder_PA_SET(&EvalueA, &EvalueB, &Stime);
-	Guangmin_PG_SET();
-
-	LOW(STBY);
-
-	OLED_Refresh();
-	delay_ms(1000);
+	SET_TRIG_and_ECHO();
+	TIM5_init();
 
 	while (1) {
-		if (car_screen_flag) {
-			count = 1 - count;
-			if (sel_flag)
-				loop_screen0();
-			else
-				loop_screen1();
-			delay_ms(200);
-			Set_PWMA(0);
-			Set_PWMB(0);
-		} else {
-			if (quan)
-				loop_car_quan();
-			else
-				loop_car();
-		}
+		//1. 触发超声波
+		TRIG_HIGH;
+		delay_us(15);	//至少10us高电平
+		TRIG_LOW;
+
+		//2. 重置状态
+		capture_done = 0;
+		TIM_SetCounter(TIM5, 0);	//清零计数器
+
+		//3. 等待测量完成（可加入超时保护）
+		while (!capture_done);
+
+		//4. 计算距离
+		uint32_t pulse_width = capture_end - capture_start;
+		float distance = pulse_width * 0.017;	//单位：cm
+
+		//5. 延时后重复测量
+		delay_ms(100);
 	}
 }
-
-/********************************************/
-void loop_car(void) {
-
-	ReadNow = ReadAll();
-
-	if (ReadNow) {
-		pid1();
-		LastRead = ReadNow;
-	} else {
-		sum_PA = 0;
-		sum_PB = 0;
-
-		if (LastRead & LEFT) {
-			GA = 0;
-			GB = 60;
-		} else if (LastRead & RIGHT) {
-			GA = 60;
-			GB = 0;
-		}
-	}
-
-	pid0();
-
-	delay_ms(loop_car_delaytime);
-}
-
-void loop_car_quan(void) {
-
-	ReadNow = ReadAll();
-
-	if (ReadNow) {
-		pid1();
-		LastRead = ReadNow;
-		bian_flag = 1;
-	} else {
-		if (LastRead & LEFT) {
-			GA = 0;
-			GB = 60;
-		} else if (LastRead & RIGHT) {
-			GA = 60;
-			GB = 0;
-		}
-		sum_PA = 0;
-		sum_PB = 0;
-
-		if (bian_flag && Stime - Stime_bian >= 200) {
-			bian++;
-			Stime_bian = Stime;
-		}
-		bian_flag = 0;
-	}
-
-	pid0();
-
-	delay_ms(loop_car_delaytime);
-
-	distance_now += EcdSpeed[(EvalueA + EvalueB) / 2];
-
-	if (bian != bian_pre) {
-		bian_pre = bian;
-
-		if (bian == 1)
-			distance = distance_now;
-		else if (bian == 4 * quan) {
-			distance_pj += distance_now;
-			distance_pj /= (4 * quan - 1);
-			distance = distance_pj - distance;
-		} else
-			distance_pj += distance_now;
-		distance_now = 0;
-	}
-
-	if (bian == 4 * quan)
-		if (distance_now >= distance) {
-			LOW(STBY);
-			while (1)
-				if (KEY_Scan(4)) {
-					car_screen_flag = 1;
-					bian = 0;
-					bian_pre = 0;
-					bian_flag = 1;
-					quan = 8;
-					Stime_bian = 0xFFFFFFFF + 1 - 200;
-					Stime = 0;
-					return;
-				}
-		}
-}
-
-void pid1(void) {
-
-	pre_Er = Er;
-
-	Er = 0;
-
-	for (uint8_t i = 0; i < 8; i++)
-		if (ReadNow & (1 << i))
-			Er += jq[i];
-
-	if (sum_Er < GAB * 100 && sum_Er > GAB * -100)
-		sum_Er += Er;
-
-	GB = LKp * Er + LKi * sum_Er + LKd * (Er - pre_Er);
-	GB /= 200;
-
-	GA = GAB + GB;
-	GB = GAB - GB;
-
-	GA = (-20 < GA && GA < 70) ? GA : ((GA < 0) ? -20 : 70);
-	GB = (-20 < GB && GB < 70) ? GB : ((GB < 0) ? -20 : 70);
-
-}
-void pidInit_1(void) {
-	LKp = value[0][0] * 100 + value[0][1] * 10 + value[0][2];
-
-	LKi = cal_value(value[1]);
-
-	LKd = value[2][0] * 100 + value[2][1] * 10 + value[2][2];
-
-	GAB = value[3][0] * 10 + value[3][1];
-
-	quan = value[4][0] * 100 + value[4][1] * 10 + value[4][2];
-
-	Er = 0;
-	pre_Er = 0;
-	sum_Er = 0;
-
-}
-
