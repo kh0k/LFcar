@@ -1,5 +1,5 @@
 #include "stm32f10x.h"
-#include "key.h"
+//#include "key.h"
 #include "oled.h"
 #include "delay.h"
 
@@ -72,15 +72,12 @@ void TIM5_IRQHandler(void) {
 		TIM_ClearITPendingBit(TIM5, TIM_IT_CC4);	//清除标志
 
 		if (TIM5->CCER & TIM_CCER_CC4P) {	//如果是下降沿捕获
-			//time = TIM_GetCapture4(TIM5) - time;	//捕获
 			time = TIM5->CCR4;	//捕获
 			TIM5->CCER &= ~TIM_CCER_CC4P;	//切换回上升沿
 			capture_done = 1;	//标记测量完成
 		} else {	//如果是上升沿捕获
-			//time = TIM_GetCapture4(TIM5);	//捕获
 			TIM5->CNT = 0;
 			capture_done = -1;
-			//TIM5->CCR4 = 0;
 			TIM5->CCER |= TIM_CCER_CC4P;	//切换为下降沿
 		}
 	}
@@ -90,6 +87,13 @@ void TIM5_IRQHandler(void) {
 			time = 0xFFFF;
 			capture_done = 1;
 		}
+		//if (capture_done <= -1) {
+		//	capture_done--;
+		//	if (capture_done == -3) {
+		//		time = 0xFFFF;
+		//		capture_done = 1;
+		//	}
+		//}
 	}
 }
 
@@ -105,29 +109,24 @@ int main(void) {
 	delay_ms(1000);
 
 	while (1) {
-		//1. 触发超声波
 		TRIG_HIGH;
-		delay_us(35);
+		delay_us(15);
 		TRIG_LOW;
 
-		//2. 重置状态
+		//重置状态
 		capture_done = 0;
-		TIM_SetCounter(TIM5, 0);	//清零计数器
 
-		//3. 等待测量完成（可加入超时保护）
+		//等待测量完成
 		while (!capture_done);
 
-		//4. 计算距离
-		//distance = time * 0.017;	//单位：cm
+		distance = time * 0.017;
 
-		//OLED_ShowString(6, 12, "distance", 12, 1);
-		//OLED_ShowNumNoLen(6, 22, (uint32_t)distance, 12, 1);
 		OLED_ShowString(6, 12, "time", 12, 1);
 		OLED_ShowNumNoLen(6, 22, time, 12, 1);
+		OLED_ShowString(6, 32, "distance", 12, 1);
+		OLED_ShowNumNoLen(6, 42, (uint32_t)distance, 12, 1);
 		OLED_Refresh();
 		OLED_ClearRF();
-
-		//5. 延时后重复测量
 		delay_ms(1000);
 	}
 }
