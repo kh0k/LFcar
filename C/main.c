@@ -1,5 +1,4 @@
 #include "stm32f10x.h"
-//#include "key.h"
 #include "oled.h"
 #include "delay.h"
 
@@ -15,7 +14,6 @@
 volatile int8_t  capture_done = 1;
 volatile uint16_t  time = 0;
 float distance = 0;
-volatile uint8_t overflow_count=0;
 
 void SET_TRIG_and_ECHO(void) {	//初始化引脚TRIG和ECHO
 	GPIO_InitTypeDef GPIO_InitStructure;
@@ -84,17 +82,9 @@ void TIM5_IRQHandler(void) {
 	}
 	if (TIM_GetITStatus(TIM5, TIM_IT_Update) != RESET) {
 		TIM_ClearITPendingBit(TIM5, TIM_IT_Update);
-		//if (capture_done == -1) {
-		//	time = 0xFFFF;
-		//	capture_done = 1;
-		//}
-		if (capture_done <= -1) {
-			capture_done--;
-			overflow_count--;
-			if (capture_done == -6) {
-				time = 0xFFFF;
-				capture_done = 1;
-			}
+		if (capture_done == -1) {
+			time = 0xFFFF;
+			capture_done = 1;
 		}
 	}
 }
@@ -102,7 +92,6 @@ void TIM5_IRQHandler(void) {
 int main(void) {
 	SystemInit();
 	delay_init();
-	//KEY_SET();
 
 	OLED_SET();
 	OLED_Refresh();
@@ -117,17 +106,14 @@ int main(void) {
 
 		//重置状态
 		capture_done = 0;
-		overflow_count = 0;
 
 		//等待测量完成
-		while (capture_done==1);
+		while (capture_done == 1);
 
 		distance = time * 0.017;
 
 		OLED_ShowString(6, 12, "time", 12, 1);
 		OLED_ShowNumNoLen(6, 22, time, 12, 1);
-		OLED_ShowString(52, 12, "over_count", 12, 1);
-		OLED_ShowNumNoLen(52, 22,overflow_count, 12, 1);
 		OLED_ShowString(6, 32, "distance", 12, 1);
 		OLED_ShowNumNoLen(6, 42, (uint32_t)distance, 12, 1);
 		OLED_Refresh();
